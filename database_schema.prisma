@@ -1,0 +1,258 @@
+// OpenClaw Database Schema v1.0
+// Generated: 2026-03-26 15:22
+// For testing framework development
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== User Management ====================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique @db.VarChar(255)
+  username        String    @unique @db.VarChar(50)
+  password_hash   String    @db.VarChar(255)
+  
+  // Role-based access control
+  roles           String[]  @default([])
+  
+  // Profile information
+  full_name       String?   @db.VarChar(100)
+  avatar_url      String?   @db.VarChar(500)
+  phone_number    String?   @db.VarChar(20)
+  
+  // Status flags
+  is_active       Boolean   @default(true)
+  is_verified     Boolean   @default(false)
+  
+  // Timestamps
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+  last_login_at   DateTime?
+  
+  // Relations
+  sessions        Session[]
+  conversations   Conversation[] @relation("ConversationOwner")
+  messages        Message[]
+  alerts          Alert[]
+  
+  @@index([email])
+  @@index([username])
+  @@index([created_at])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  user_id      String
+  token        String   @unique @db.VarChar(500)
+  user_agent   String?  @db.VarChar(500)
+  ip_address   String?  @db.VarChar(45)
+  
+  // Session metadata
+  is_valid     Boolean  @default(true)
+  expires_at   DateTime
+  
+  // Timestamps
+  created_at   DateTime @default(now())
+  
+  // Relations
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  @@index([user_id])
+  @@index([token])
+  @@index([expires_at])
+}
+
+// ==================== Conversation Service ====================
+
+model Conversation {
+  id          String    @id @default(cuid())
+  title       String    @db.VarChar(255)
+  description String?   @db.Text
+  
+  // Owner reference
+  owner_id    String
+  owner       User      @relation("ConversationOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  
+  // Conversation settings
+  is_archived Boolean   @default(false)
+  is_public   Boolean   @default(false)
+  
+  // Metadata
+  tags        String[]  @default([])
+  
+  // Timestamps
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  
+  // Relations
+  messages    Message[]
+  participants ConversationParticipant[]
+  
+  @@index([owner_id])
+  @@index([created_at])
+  @@index([is_archived])
+}
+
+model ConversationParticipant {
+  id              String       @id @default(cuid())
+  conversation_id String
+  user_id         String
+  role            String       @default("member") // owner, admin, member
+  
+  // Participant settings
+  notification_enabled Boolean @default(true)
+  
+  // Timestamps
+  joined_at       DateTime     @default(now())
+  
+  // Relations
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  @@unique([conversation_id, user_id])
+  @@index([conversation_id])
+  @@index([user_id])
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  conversation_id String
+  sender_id       String
+  
+  // Message content
+  content         String   @db.Text
+  message_type    String   @default("text") // text, image, file, system
+  metadata        Json?    // Additional message metadata
+  
+  // Status flags
+  is_edited       Boolean  @default(false)
+  is_deleted      Boolean  @default(false)
+  
+  // Timestamps
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  
+  // Relations
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  sender          User         @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+  
+  @@index([conversation_id, created_at])
+  @@index([sender_id, created_at])
+  @@index([created_at])
+}
+
+// ==================== Quant Analysis Service ====================
+
+model Stock {
+  id            String    @id @default(cuid())
+  symbol        String    @unique @db.VarChar(20)
+  name          String    @db.VarChar(100)
+  market        String    @db.VarChar(20)
+  sector        String?   @db.VarChar(50)
+  
+  // Timestamps
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  
+  // Relations
+  stock_prices  StockPrice[]
+  
+  @@index([symbol])
+  @@index([market])
+  @@index([sector])
+}
+
+model StockPrice {
+  id          String   @id @default(cuid())
+  stock_id    String
+  date        DateTime
+  open        Float    @db.Decimal(10, 4)
+  high        Float    @db.Decimal(10, 4)
+  low         Float    @db.Decimal(10, 4)
+  close       Float    @db.Decimal(10, 4)
+  volume      BigInt
+  amount      Float?   @db.Decimal(15, 4)
+  
+  // Technical indicators
+  ma5         Float?   @db.Decimal(10, 4)
+  ma10        Float?   @db.Decimal(10, 4)
+  ma20        Float?   @db.Decimal(10, 4)
+  rsi         Float?   @db.Decimal(5, 2)
+  macd        Float?   @db.Decimal(10, 4)
+  
+  // Relations
+  stock       Stock    @relation(fields: [stock_id], references: [id], onDelete: Cascade)
+  
+  @@unique([stock_id, date])
+  @@index([stock_id])
+  @@index([date])
+  @@index([stock_id, date])
+}
+
+model Alert {
+  id          String   @id @default(cuid())
+  user_id     String
+  stock_id    String?
+  
+  // Alert configuration
+  alert_type  String   @db.VarChar(50) // price, indicator, news
+  condition   String   @db.VarChar(100)
+  target_value String  @db.VarChar(50)
+  is_active   Boolean  @default(true)
+  
+  // Notification settings
+  notify_email Boolean @default(false)
+  notify_push  Boolean @default(false)
+  notify_sms   Boolean @default(false)
+  
+  // Status
+  last_triggered_at DateTime?
+  
+  // Timestamps
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  
+  // Relations
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  stock       Stock?   @relation(fields: [stock_id], references: [id], onDelete: SetNull)
+  
+  @@index([user_id])
+  @@index([stock_id])
+  @@index([is_active])
+  @@index([created_at])
+}
+
+// ==================== Analytics & Audit ====================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  user_id     String?
+  
+  // Action details
+  action      String   @db.VarChar(100)
+  entity_type String   @db.VarChar(50)
+  entity_id   String?
+  changes     Json?
+  
+  // Metadata
+  ip_address  String?  @db.VarChar(45)
+  user_agent  String?  @db.VarChar(500)
+  
+  // Timestamps
+  created_at  DateTime @default(now())
+  
+  // Relations
+  user        User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  
+  @@index([user_id])
+  @@index([action])
+  @@index([entity_type, entity_id])
+  @@index([created_at])
+}

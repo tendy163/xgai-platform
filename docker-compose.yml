@@ -1,0 +1,231 @@
+version: '3.8'
+
+# XG-ai TypeScript Monorepo 开发环境
+# 端口分配：
+# - 3000: gateway-service (API网关)
+# - 3001-3002: 小策Mock服务 (DeepSeek 3001, Tushare 3002)
+# - 3006-3010: 开发服务 (auth-service 3006, chat-service 3007, quant-service 3008, client-service 3009, notify-service 3010)
+# - 5432: PostgreSQL数据库
+# - 6379: Redis缓存
+
+services:
+  # 基础服务
+  postgres:
+    image: postgres:16-alpine
+    container_name: xgai-postgres
+    environment:
+      POSTGRES_USER: xgai
+      POSTGRES_PASSWORD: xgai_password
+      POSTGRES_DB: xgai_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    networks:
+      - xgai-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xgai"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: xgai-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - xgai-network
+    command: redis-server --appendonly yes
+
+  # 网关服务 (小马开发)
+  gateway-service:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    container_name: xgai-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://xgai:xgai_password@postgres:5432/xgai_db
+      REDIS_URL: redis://redis:6379
+      AUTH_SERVICE_URL: http://auth-service:3006
+      CHAT_SERVICE_URL: http://chat-service:3007
+      QUANT_SERVICE_URL: http://quant-service:3008
+      CLIENT_SERVICE_URL: http://client-service:3009
+      NOTIFY_SERVICE_URL: http://notify-service:3010
+    depends_on:
+      - postgres
+      - redis
+      - auth-service
+      - chat-service
+      - quant-service
+      - client-service
+      - notify-service
+    networks:
+      - xgai-network
+    volumes:
+      - ./services/gateway:/app
+      - /app/node_modules
+
+  # 认证服务 (小马开发)
+  auth-service:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    container_name: xgai-auth
+    ports:
+      - "3006:3006"
+    environment:
+      NODE_ENV: development
+      PORT: 3006
+      DATABASE_URL: postgresql://xgai:xgai_password@postgres:5432/xgai_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: xgai_jwt_secret_development
+      JWT_EXPIRES_IN: 7d
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - xgai-network
+    volumes:
+      - ./services/auth:/app
+      - /app/node_modules
+
+  # 聊天服务 (小马开发)
+  chat-service:
+    build:
+      context: ./services/chat
+      dockerfile: Dockerfile
+    container_name: xgai-chat
+    ports:
+      - "3007:3007"
+    environment:
+      NODE_ENV: development
+      PORT: 3007
+      DATABASE_URL: postgresql://xgai:xgai_password@postgres:5432/xgai_db
+      REDIS_URL: redis://redis:6379
+      DEEPSEEK_API_URL: http://deepseek-mock:3001
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-test_key}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - xgai-network
+    volumes:
+      - ./services/chat:/app
+      - /app/node_modules
+
+  # 量化分析服务 (小马开发)
+  quant-service:
+    build:
+      context: ./services/quant
+      dockerfile: Dockerfile
+    container_name: xgai-quant
+    ports:
+      - "3008:3008"
+    environment:
+      NODE_ENV: development
+      PORT: 3008
+      DATABASE_URL: postgresql://xgai:xgai_password@postgres:5432/xgai_db
+      REDIS_URL: redis://redis:6379
+      TUSHARE_API_URL: http://tushare-mock:3002
+      TUSHARE_API_KEY: ${TUSHARE_API_KEY:-test_key}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - xgai-network
+    volumes:
+      - ./services/quant:/app
+      - /app/node_modules
+
+  # 客户端服务 (小马开发)
+  client-service:
+    build:
+      context: ./services/client
+      dockerfile: Dockerfile
+    container_name: xgai-client
+    ports:
+      - "3009:3009"
+    environment:
+      NODE_ENV: development
+      PORT: 3009
+      DATABASE_URL: postgresql://xgai:xgai_password@postgres:5432/xgai_db
+      REDIS_URL: redis://redis:6379
+      GATEWAY_URL: http://gateway-service:3000
+    depends_on:
+      - postgres
+      - redis
+      - gateway-service
+    networks:
+      - xgai-network
+    volumes:
+      - ./services/client:/app
+      - /app/node_modules
+
+  # 通知服务 (小马开发)
+  notify-service:
+    build:
+      context: ./services/notify
+      dockerfile: Dockerfile
+    container_name: xgai-notify
+    ports:
+      - "3010:3010"
+    environment:
+      NODE_ENV: development
+      PORT: 3010
+      DATABASE_URL: postgresql://xgai:xgai_password@postgres:5432/xgai_db
+      REDIS_URL: redis://redis:6379
+      GATEWAY_URL: http://gateway-service:3000
+    depends_on:
+      - postgres
+      - redis
+      - gateway-service
+    networks:
+      - xgai-network
+    volumes:
+      - ./services/notify:/app
+      - /app/node_modules
+
+  # 小策Mock服务
+  deepseek-mock:
+    image: node:20-alpine
+    container_name: xgai-deepseek-mock
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+    networks:
+      - xgai-network
+    volumes:
+      - ./mock-services/deepseek-mock:/app
+      - /app/node_modules
+    command: ["npm", "start"]
+
+  tushare-mock:
+    image: node:20-alpine
+    container_name: xgai-tushare-mock
+    ports:
+      - "3002:3002"
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+    networks:
+      - xgai-network
+    volumes:
+      - ./mock-services/tushare-mock:/app
+      - /app/node_modules
+    command: ["npm", "start"]
+
+networks:
+  xgai-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

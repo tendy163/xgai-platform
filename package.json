@@ -1,0 +1,14 @@
+{
+  "name": "xg-ai-monorepo",
+  "version": "0.1.0",
+  "description": "XG-ai platform monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -ws",
+    "build": "npm run build -ws",
+    "start": "npm run start -ws"
+  }
+}
